@@ -39,7 +39,7 @@ class EnvState(environment.EnvState):
         )
         return cls(grid=puzzle[0],
                    next_piece=puzzle[1],
-                   other_pieces=puzzle[None, 2:],
+                   other_pieces=puzzle[2:],
                    time=time,
                    )
 
