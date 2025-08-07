@@ -23,14 +23,15 @@ class EnvState(environment.EnvState):
     grid: jax.Array  # shape (pieces+1, grid_size, grid_size), dtype=bool
 
     @classmethod
-    def init(cls, key: PRNGKeyArray, params: EnvParams,
-             grid_size: int, n_pieces: int) -> EnvState:
+    def init(cls, key: PRNGKeyArray,
+             grid_size: int, n_pieces: int,
+             min_piece_size: int, max_piece_size: int) -> EnvState:
         grid = create_puzzle(
             key,
             grid_size=grid_size,
             n_pieces=n_pieces,
-            min_piece_size=params.min_piece_size,
-            max_piece_size=params.max_piece_size,
+            min_piece_size=min_piece_size,
+            max_piece_size=max_piece_size,
         )
         return cls(grid=grid)
 
@@ -44,10 +45,13 @@ class EnvState(environment.EnvState):
 
 
 class PuzzlePacking(environment.Environment[EnvState, EnvParams]):
-    def __init__(self, grid_size: int = 4, n_pieces: int = 4):
+    def __init__(self, grid_size: int = 4, n_pieces: int = 4,
+                 min_piece_size: int = 2, max_piece_size: int = 4):
         super().__init__()
         self.grid_size = grid_size
         self.n_pieces = n_pieces
+        self.min_piece_size = min_piece_size
+        self.max_piece_size = max_piece_size
 
     @property
     def default_params(self) -> EnvParams:
@@ -65,10 +69,11 @@ class PuzzlePacking(environment.Environment[EnvState, EnvParams]):
     def reset_env(self, key: PRNGKeyArray, params: EnvParams):
         state = EnvState.init(
             key,
-            params=params,
             grid_size=self.grid_size,
-            n_pieces=self.n_pieces,)
-        ...
+            n_pieces=self.n_pieces,
+            min_piece_size=self.min_piece_size,
+            max_piece_size=self.max_piece_size,
+        ).roll_top_left()
         return self.get_obs(state), state
 
     def get_obs(self, state: EnvState, params=None, key=None) -> jax.Array:
