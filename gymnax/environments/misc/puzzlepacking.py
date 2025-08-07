@@ -23,6 +23,7 @@ class EnvState(environment.EnvState):
     grid: jax.Array  # shape (grid_size, grid_size)
     next_piece: jax.Array  # shape (grid_size, grid_size)
     other_pieces: jax.Array  # shape (n_pieces-1, grid_size, grid_size)
+    initial_free_space: jax.Array
     time: int
 
     @classmethod
@@ -36,10 +37,14 @@ class EnvState(environment.EnvState):
             n_pieces=n_pieces,
             min_piece_size=min_piece_size,
             max_piece_size=max_piece_size,
-        )
+        ).astype(jnp.float32)
+
+        initial_free_space = jnp.sum(jnp.abs(puzzle[0]))
+
         return cls(grid=puzzle[0],
                    next_piece=puzzle[1],
                    other_pieces=puzzle[2:],
+                   initial_free_space=initial_free_space,
                    time=time,
                    )
 
@@ -49,7 +54,9 @@ class EnvState(environment.EnvState):
         return EnvState(grid=self.grid,
                         next_piece=next_piece_rolled,
                         other_pieces=other_pieces_rolled,
-                        time=self.time)
+                        initial_free_space=self.initial_free_space,
+                        time=self.time,
+                        )
 
 
 class PuzzlePacking(environment.Environment[EnvState, EnvParams]):
@@ -72,7 +79,73 @@ class PuzzlePacking(environment.Environment[EnvState, EnvParams]):
         action: int | float | jax.Array,
         params: EnvParams,
     ) -> tuple[jax.Array, EnvState, jax.Array, jax.Array, dict[Any, Any]]:
-        ...
+        moved_piece, penalty = padded_translate(
+            piece=state.next_piece,
+            shift=self.num_to_action(action),
+            grid_size=self.grid_size,
+        )
+
+        # Add the moved piece to the grid
+        new_grid = state.grid + moved_piece
+
+        # The next piece becomes the first of the other pieces
+        new_next_piece = state.other_pieces[0]
+
+        # Shift other pieces
+        new_other_pieces = jnp.roll(
+            state.other_pieces, shift=-1, axis=0)
+        new_other_pieces = new_other_pieces.at[-1].set(
+            jnp.zeros_like(new_other_pieces[-1]))
+
+        # Update state
+        state = state.replace(
+            grid=new_grid,
+            next_piece=new_next_piece,
+            other_pieces=new_other_pieces,
+            time=state.time + 1,
+        )
+
+        # Calculate reward
+        reward = self.calculate_reward(
+            grid=new_grid,
+            piece=moved_piece,
+            penalty=penalty,
+            initial_free_space=state.initial_free_space,
+        )
+
+        done = self.is_terminal(state, params)
+
+        info = {}
+
+        return (
+            jax.lax.stop_gradient(self.get_obs(state)),
+            jax.lax.stop_gradient(state),
+            reward.astype(jnp.float32),
+            done,
+            info,
+        )
+
+    def num_to_action(self, action: int | float | jax.Array) -> jax.Array:
+        """Convert action number to (row_shift, col_shift)."""
+        action = jnp.asarray(action).astype(jnp.int32)
+        row_shift = action // self.grid_size
+        col_shift = action % self.grid_size
+        return jnp.array([row_shift, col_shift])
+
+    def calculate_reward(self, grid: jax.Array,
+                         piece: jax.Array, penalty: float,
+                         initial_free_space: jax.Array,
+                         penalty_factor: float = 0.0):
+
+        old_reward = jnp.abs(grid).sum()
+        new_reward = jnp.abs(grid + piece).sum() - \
+            (penalty * (1.0 + penalty_factor))
+
+        diff = new_reward - old_reward
+        return diff
+
+        # normalize between initial_free_space and 2*initial_free_space
+        normalized_reward = (diff) / (initial_free_space + 1e-8)
 
     def reset_env(self, key: PRNGKeyArray, params: EnvParams):
         state = EnvState.init(
@@ -97,7 +170,7 @@ class PuzzlePacking(environment.Environment[EnvState, EnvParams]):
         return obs.astype(jnp.float32)
 
     def is_terminal(self, state: EnvState, params: EnvParams) -> jax.Array:
-        ...
+        return state.time >= self.n_pieces
 
     @property
     def name(self) -> str:
@@ -207,7 +280,6 @@ def sample_coord(key, prob_matrix):
     return jnp.array([row, col]), prob_matrix, path_grid
 
 
-# @eqx.filter_jit
 def create_puzzle(
         key: PRNGKeyArray,
         grid_size: int = 4,
@@ -292,4 +364,17 @@ def create_puzzle(
         xs=piece_sizes,
     )
 
-    return jnp.concat((final_state[None, :], pieces), axis=0)
+    return jnp.concat((final_state[None, :] - 1.0, pieces), axis=0)
+
+
+def padded_translate(piece: jax.Array, shift: jax.Array, grid_size: int):
+    # Step 1: Pad array with zeros
+    padded = jnp.pad(
+        piece, ((0, grid_size-1), (0, grid_size-1)), mode='constant')
+
+    # Step 2: Roll the padded array
+    rolled = jnp.roll(padded, shift=shift, axis=(0, 1))
+    rolled_cropped = rolled[:grid_size, :grid_size]
+    off_grid_penalty = rolled.sum() - rolled_cropped.sum()
+    # Step 3: Crop the central 4x4 region
+    return rolled[:grid_size, :grid_size], off_grid_penalty
