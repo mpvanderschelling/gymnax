@@ -20,28 +20,36 @@ class EnvParams(environment.EnvParams):
 
 @struct.dataclass
 class EnvState(environment.EnvState):
-    grid: jax.Array  # shape (pieces+1, grid_size, grid_size), dtype=bool
+    grid: jax.Array  # shape (grid_size, grid_size)
+    next_piece: jax.Array  # shape (grid_size, grid_size)
+    other_pieces: jax.Array  # shape (n_pieces-1, grid_size, grid_size)
+    time: int
 
     @classmethod
     def init(cls, key: PRNGKeyArray,
              grid_size: int, n_pieces: int,
-             min_piece_size: int, max_piece_size: int) -> EnvState:
-        grid = create_puzzle(
+             min_piece_size: int, max_piece_size: int,
+             time: int,) -> EnvState:
+        puzzle = create_puzzle(
             key,
             grid_size=grid_size,
             n_pieces=n_pieces,
             min_piece_size=min_piece_size,
             max_piece_size=max_piece_size,
         )
-        return cls(grid=grid)
+        return cls(grid=puzzle[0],
+                   next_piece=puzzle[1],
+                   other_pieces=puzzle[None, 2:],
+                   time=time,
+                   )
 
     def roll_top_left(self) -> EnvState:
-        rolled_grid = jnp.concatenate(
-            [self.grid[None, 0],
-             jax.vmap(roll_top_left)(self.grid[1:]),
-             ]
-        )
-        return EnvState(grid=rolled_grid)
+        next_piece_rolled = roll_top_left(self.next_piece)
+        other_pieces_rolled = jax.vmap(roll_top_left)(self.other_pieces)
+        return EnvState(grid=self.grid,
+                        next_piece=next_piece_rolled,
+                        other_pieces=other_pieces_rolled,
+                        time=self.time)
 
 
 class PuzzlePacking(environment.Environment[EnvState, EnvParams]):
@@ -73,14 +81,17 @@ class PuzzlePacking(environment.Environment[EnvState, EnvParams]):
             n_pieces=self.n_pieces,
             min_piece_size=self.min_piece_size,
             max_piece_size=self.max_piece_size,
+            time=0,
         ).roll_top_left()
         return self.get_obs(state), state
 
     def get_obs(self, state: EnvState, params=None, key=None) -> jax.Array:
         obs = jnp.concatenate(
-            [state.grid[None, 0],
-             jax.vmap(roll_top_left)(state.grid[1:]),
-             ]
+            [state.grid[None, :],
+             state.next_piece[None, :],
+             state.other_pieces
+             ],
+            dtype=jnp.float32
         )
 
         return obs.astype(jnp.float32)
@@ -123,7 +134,10 @@ class PuzzlePacking(environment.Environment[EnvState, EnvParams]):
     def render(self, state: EnvState, _: EnvParams):
         _, axes = plt.subplots(1, 5, figsize=(5, 1))
         for i, ax in enumerate(axes):
-            ax.imshow(self.grid[i], cmap=COLORMAPS[i])
+            if i == 0:
+                ax.imshow(state.grid, cmap='Greys')
+            else:
+                ax.imshow(self.grid[i], cmap=COLORMAPS[i])
             ax.set_xticklabels([])
             ax.set_yticklabels([])
             ax.set_xticks([])
@@ -133,7 +147,6 @@ class PuzzlePacking(environment.Environment[EnvState, EnvParams]):
 
 
 COLORMAPS = [
-    'grey',
     'Purples',
     'Blues',
     'Greens',
