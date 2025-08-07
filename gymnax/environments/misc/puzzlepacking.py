@@ -136,8 +136,10 @@ class PuzzlePacking(environment.Environment[EnvState, EnvParams]):
         for i, ax in enumerate(axes):
             if i == 0:
                 ax.imshow(state.grid, cmap='Greys')
+            elif i == 1:
+                ax.imshow(state.next_piece, cmap=COLORMAPS[i])
             else:
-                ax.imshow(self.grid[i], cmap=COLORMAPS[i])
+                ax.imshow(state.other_pieces[i - 2], cmap=COLORMAPS[i])
             ax.set_xticklabels([])
             ax.set_yticklabels([])
             ax.set_xticks([])
