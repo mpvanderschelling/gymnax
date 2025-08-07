@@ -1,32 +1,16 @@
 """A JAX implementation of OpenAI's infamous env.make(env_name)."""
 
-from gymnax.environments.bsuite import (
-    bandit,
-    catch,
-    deep_sea,
-    discounting_chain,
-    memory_chain,
-    mnist,
-    umbrella_chain,
-)
-from gymnax.environments.classic_control import (
-    acrobot,
-    cartpole,
-    continuous_mountain_car,
-    mountain_car,
-    pendulum,
-)
-from gymnax.environments.minatar import asterix, breakout, freeway, space_invaders
-from gymnax.environments.misc import (
-    bernoulli_bandit,
-    gaussian_bandit,
-    meta_maze,
-    point_robot,
-    pong,
-    reacher,
-    rooms,
-    swimmer,
-)
+from gymnax.environments.bsuite import (bandit, catch, deep_sea,
+                                        discounting_chain, memory_chain, mnist,
+                                        umbrella_chain)
+from gymnax.environments.classic_control import (acrobot, cartpole,
+                                                 continuous_mountain_car,
+                                                 mountain_car, pendulum)
+from gymnax.environments.minatar import (asterix, breakout, freeway,
+                                         space_invaders)
+from gymnax.environments.misc import (bernoulli_bandit, gaussian_bandit,
+                                      meta_maze, point_robot, pong,
+                                      puzzlepacking, reacher, rooms, swimmer)
 
 # =============================================================================
 
@@ -107,6 +91,10 @@ def make(env_id: str, **env_kwargs):
     else:
         raise ValueError("Environment ID is not registered.")
 
+    # 5. Puzzle Packing Environment
+    if env_id == "PuzzlePacking":
+        env = puzzlepacking.PuzzlePacking(**env_kwargs)
+
     return env, env.default_params
 
 
@@ -136,4 +124,5 @@ registered_envs = [
     "Reacher-misc",
     "Swimmer-misc",
     "Pong-misc",
+    "PuzzlePacking",
 ]
