@@ -5,7 +5,9 @@ from typing import Any
 import jax
 import jax.numpy as jnp
 import jax.random as jr
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
+import numpy as np
 from flax import struct
 from jaxtyping import PRNGKeyArray
 
@@ -14,8 +16,7 @@ from gymnax.environments import environment, spaces
 
 @struct.dataclass
 class EnvParams(environment.EnvParams):
-    min_piece_size: int = 2
-    max_piece_size: int = 4
+    penalty_factor: float = 0.0
 
 
 @struct.dataclass
@@ -111,6 +112,7 @@ class PuzzlePacking(environment.Environment[EnvState, EnvParams]):
             piece=moved_piece,
             penalty=penalty,
             initial_free_space=state.initial_free_space,
+            penalty_factor=params.penalty_factor,
         )
 
         done = self.is_terminal(state, params)
@@ -135,17 +137,15 @@ class PuzzlePacking(environment.Environment[EnvState, EnvParams]):
     def calculate_reward(self, grid: jax.Array,
                          piece: jax.Array, penalty: float,
                          initial_free_space: jax.Array,
-                         penalty_factor: float = 0.0):
+                         penalty_factor: float):
 
-        old_reward = jnp.abs(grid).sum()
-        new_reward = jnp.abs(grid + piece).sum() - \
+        old_penalty = jnp.abs(grid).sum()
+        new_penalty = jnp.abs(grid + piece).sum() - \
             (penalty * (1.0 + penalty_factor))
 
-        diff = new_reward - old_reward
-        return diff
-
-        # normalize between initial_free_space and 2*initial_free_space
-        normalized_reward = (diff) / (initial_free_space + 1e-8)
+        diff = new_penalty - old_penalty
+        normalized_diff = diff / initial_free_space
+        return normalized_diff
 
     def reset_env(self, key: PRNGKeyArray, params: EnvParams):
         state = EnvState.init(
@@ -205,16 +205,31 @@ class PuzzlePacking(environment.Environment[EnvState, EnvParams]):
         )
 
     def render(self, state: EnvState, _: EnvParams):
+        # Create a custom colormap for the grid
+        grid = state.grid
+        vmax = int(state.initial_free_space)
+
+        # Define colors: white for -1, copper for [0, vmax]
+        cmap_copper = plt.get_cmap("copper")
+        norm = mcolors.Normalize(vmin=0, vmax=vmax)
+
+        # Create a new colormap with white for -1
+        colors = [(1, 1, 1)] + [cmap_copper(norm(i)) for i in range(vmax + 1)]
+        grid_cmap = mcolors.ListedColormap(colors, name="custom_grid")
+
+        # Create a boundary norm to match -1 to 0, 0 to 1, ..., vmax to vmax+1
+        boundaries = np.arange(-1.5, vmax + 1.5)
+        grid_norm = mcolors.BoundaryNorm(boundaries, grid_cmap.N)
+
+        # Plot
         _, axes = plt.subplots(1, 5, figsize=(5, 1))
         for i, ax in enumerate(axes):
             if i == 0:
-                ax.imshow(state.grid, cmap='Greys')
+                ax.imshow(grid, cmap=grid_cmap, norm=grid_norm)
             elif i == 1:
                 ax.imshow(state.next_piece, cmap=COLORMAPS[i])
             else:
                 ax.imshow(state.other_pieces[i - 2], cmap=COLORMAPS[i])
-            ax.set_xticklabels([])
-            ax.set_yticklabels([])
             ax.set_xticks([])
             ax.set_yticks([])
 
