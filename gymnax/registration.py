@@ -88,12 +88,13 @@ def make(env_id: str, **env_kwargs):
         env = swimmer.Swimmer(**env_kwargs)
     elif env_id == "Pong-misc":
         env = pong.Pong(**env_kwargs)
-    else:
-        raise ValueError("Environment ID is not registered.")
 
     # 5. Puzzle Packing Environment
     if env_id == "PuzzlePacking":
         env = puzzlepacking.PuzzlePacking(**env_kwargs)
+
+    else:
+        raise ValueError("Environment ID is not registered.")
 
     return env, env.default_params
 
