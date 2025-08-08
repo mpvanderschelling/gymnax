@@ -6,6 +6,7 @@ import jax.numpy as jnp
 import torch
 import numpy as np
 import gymnax
+import os
 
 
 class BatchedTrainerCompatibleWrapper:
@@ -34,6 +35,15 @@ class BatchedTrainerCompatibleWrapper:
         self.batch_size = batch_size
         self.device = device
         
+        # Configure JAX for GPU if requested and available
+        if device != "cpu" and jax.default_backend() == "gpu":
+            # JAX will automatically use GPU if available
+            pass
+        elif device != "cpu":
+            # Warn if GPU requested but not available
+            if not jax.default_backend() == "gpu":
+                print(f"Warning: GPU requested but JAX backend is {jax.default_backend()}. Using CPU.")
+        
         # Initialize JAX environment
         if env_kwargs is None:
             env_kwargs = {}
@@ -53,7 +63,9 @@ class BatchedTrainerCompatibleWrapper:
         
     def _jax_to_torch(self, jax_array: jax.Array) -> torch.Tensor:
         """Convert JAX array to PyTorch tensor."""
-        return torch.from_numpy(np.array(jax_array)).to(self.device)
+        # Use device_get to efficiently transfer from JAX device to host
+        numpy_array = np.array(jax.device_get(jax_array))
+        return torch.from_numpy(numpy_array).to(self.device)
         
     def _torch_to_jax(self, torch_tensor: torch.Tensor) -> jax.Array:
         """Convert PyTorch tensor to JAX array."""
