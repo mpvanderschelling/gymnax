@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from flax import struct
 from jaxtyping import PRNGKeyArray
+from matplotlib import gridspec
 
 from gymnax.environments import environment, spaces
 
@@ -214,36 +215,93 @@ class PuzzlePacking(environment.Environment[EnvState, EnvParams]):
             }
         )
 
+    # def render(self, state: EnvState, _: EnvParams):
+    #     # Create a custom colormap for the grid
+    #     grid = state.grid
+    #     vmax = int(state.initial_free_space)
+
+    #     # Define colors: white for -1, copper for [0, vmax]
+    #     cmap_copper = plt.get_cmap("copper")
+    #     norm = mcolors.Normalize(vmin=0, vmax=vmax)
+
+    #     # Create a new colormap with white for -1
+    #     colors = [(1, 1, 1)] + [cmap_copper(norm(i)) for i in range(vmax + 1)]
+    #     grid_cmap = mcolors.ListedColormap(colors, name="custom_grid")
+
+    #     # Create a boundary norm to match -1 to 0, 0 to 1, ..., vmax to vmax+1
+    #     boundaries = np.arange(-1.5, vmax + 1.5)
+    #     grid_norm = mcolors.BoundaryNorm(boundaries, grid_cmap.N)
+
+    #     # Plot
+    #     _, axes = plt.subplots(1, self.n_pieces+1, figsize=(self.n_pieces, 1))
+    #     for i, ax in enumerate(axes):
+    #         if i == 0:
+    #             ax.imshow(grid, cmap=grid_cmap, norm=grid_norm)
+    #         elif i == 1:
+    #             ax.imshow(state.next_piece, cmap=COLORMAPS[i])
+    #         else:
+    #             ax.imshow(state.other_pieces[i - 2], cmap=COLORMAPS[i])
+    #         ax.set_xticks([])
+    #         ax.set_yticks([])
+
+    #     return axes
+
     def render(self, state: EnvState, _: EnvParams):
-        # Create a custom colormap for the grid
         grid = state.grid
         vmax = int(state.initial_free_space)
+        reward_proxy = 1.0 - (np.sum(np.abs(grid)) / vmax)
 
-        # Define colors: white for -1, copper for [0, vmax]
+        # Create custom colormap with white for -1 and copper for >= 0
         cmap_copper = plt.get_cmap("copper")
         norm = mcolors.Normalize(vmin=0, vmax=vmax)
-
-        # Create a new colormap with white for -1
         colors = [(1, 1, 1)] + [cmap_copper(norm(i)) for i in range(vmax + 1)]
         grid_cmap = mcolors.ListedColormap(colors, name="custom_grid")
-
-        # Create a boundary norm to match -1 to 0, 0 to 1, ..., vmax to vmax+1
         boundaries = np.arange(-1.5, vmax + 1.5)
         grid_norm = mcolors.BoundaryNorm(boundaries, grid_cmap.N)
 
-        # Plot
-        _, axes = plt.subplots(1, self.n_pieces+1, figsize=(self.n_pieces, 1))
-        for i, ax in enumerate(axes):
-            if i == 0:
-                ax.imshow(grid, cmap=grid_cmap, norm=grid_norm)
-            elif i == 1:
-                ax.imshow(state.next_piece, cmap=COLORMAPS[i])
-            else:
-                ax.imshow(state.other_pieces[i - 2], cmap=COLORMAPS[i])
+        # Layout setup
+        fig = plt.figure(figsize=(4, 4))
+        gs = gridspec.GridSpec(3, 3, height_ratios=[1, 4, 0.3], figure=fig)
+
+        # Top: Pieces
+        ax_next = fig.add_subplot(gs[0, 0])
+        ax_other1 = fig.add_subplot(gs[0, 1])
+        ax_other2 = fig.add_subplot(gs[0, 2])
+
+        ax_next.imshow(state.next_piece, cmap="Purples")
+        # ax_next.set_title("Next Piece", fontsize=10)
+        ax_other1.imshow(state.other_pieces[0], cmap="Blues")
+        # ax_other1.set_title("Piece 2", fontsize=8)
+        ax_other2.imshow(state.other_pieces[1], cmap="Reds")
+        # ax_other2.set_title("Piece 3", fontsize=8)
+
+        for ax in [ax_next, ax_other1, ax_other2]:
             ax.set_xticks([])
             ax.set_yticks([])
 
-        return axes
+        # Middle: Grid
+        ax_grid = fig.add_subplot(gs[1, :])
+        ax_grid.imshow(grid, cmap=grid_cmap, norm=grid_norm)
+        # ax_grid.set_title("Grid", fontsize=10)
+        ax_grid.set_xticks([])
+        ax_grid.set_yticks([])
+
+        # Bottom: Progress bar
+        ax_bar = fig.add_subplot(gs[2, :])
+        # m = vmax  # assuming m = initial_free_space
+        ax_bar.barh(0, reward_proxy, color='green', height=0.3)
+        ax_bar.set_xlim(0, 1)
+        ax_bar.set_yticks([])
+        ax_bar.set_xticks([])
+        ax_bar.set_xticklabels([])
+        # ax_bar.set_title(
+        #     f"Reward: {reward_proxy:.0f} / {m}", fontsize=9)
+
+        fig.suptitle(
+            f"Number of pieces: {state.time:.0f}/{self.n_pieces:.0f}",
+            fontsize=12)
+
+        return fig
 
 
 COLORMAPS = [
@@ -325,7 +383,8 @@ def create_puzzle(
         grid_size: int = 4,
         n_pieces: int = 4,
         min_piece_size: int = 2,
-        max_piece_size: int = 5):
+        max_piece_size: int = 5,
+        return_creation: bool = False,):
 
     key_walk, key_sizes = jr.split(key)
     init_grid = jnp.ones((grid_size, grid_size), dtype=bool)
@@ -349,7 +408,7 @@ def create_puzzle(
 
             def early_exit():
                 return (pos, visited, path, path_grid, step, True,
-                        key, piece_size), None
+                        key, piece_size), visited
 
             def do_step():
                 candidates = pos + deltas  # (4, 2)
@@ -364,7 +423,7 @@ def create_puzzle(
 
                 def no_valid():
                     return (pos, visited, path, path_grid, step, True,
-                            key, piece_size), None
+                            key, piece_size), visited
 
                 def has_valid():
                     # Assign large negative logits to invalid moves so
@@ -380,7 +439,7 @@ def create_puzzle(
                     path_updated = path.at[step + 1].set(new_pos)
                     return (new_pos, visited_updated, path_updated,
                             path_grid_updated, step + 1, False, key,
-                            piece_size), None
+                            piece_size), visited
 
                 return jax.lax.cond(any_valid, has_valid, no_valid)
 
@@ -389,22 +448,26 @@ def create_puzzle(
         init_state = (start_pos, visited_grid, path_init,
                       path_grid, 0, False, key, piece_size)
 
-        final_state, _ = jax.lax.scan(
+        final_state, visited_progression = jax.lax.scan(
             step_fn,
             init=init_state,
             xs=None,
             length=max_piece_size - 1)
         _, final_grid, _, new_path_grid, _, _, _, _ = final_state
 
-        return (new_key, final_grid), new_path_grid
+        return (new_key, final_grid), (new_path_grid, visited_progression)
     init_carry = (key_walk, init_grid)
-    (_, final_state), pieces = jax.lax.scan(
+    (_, final_state), (pieces, visited_progression) = jax.lax.scan(
         place_piece,
         init=init_carry,
         xs=piece_sizes,
     )
+    puzzle = jnp.concat((final_state[None, :] - 1.0, pieces), axis=0)
 
-    return jnp.concat((final_state[None, :] - 1.0, pieces), axis=0)
+    if return_creation:
+        return puzzle, visited_progression
+
+    return puzzle
 
 
 def padded_translate(piece: jax.Array, shift: jax.Array, grid_size: int):
