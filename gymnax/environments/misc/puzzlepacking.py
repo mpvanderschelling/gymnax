@@ -16,7 +16,7 @@ from gymnax.environments import environment, spaces
 
 @struct.dataclass
 class EnvParams(environment.EnvParams):
-    penalty_factor: float = 0.0
+    penalty_factor: float = 1.0
 
 
 @struct.dataclass
@@ -24,14 +24,13 @@ class EnvState(environment.EnvState):
     grid: jax.Array  # shape (grid_size, grid_size)
     next_piece: jax.Array  # shape (grid_size, grid_size)
     other_pieces: jax.Array  # shape (n_pieces-1, grid_size, grid_size)
-    initial_free_space: jax.Array
+    initial_free_space: int
     time: int
 
     @classmethod
     def init(cls, key: PRNGKeyArray,
              grid_size: int, n_pieces: int,
-             min_piece_size: int, max_piece_size: int,
-             time: int,) -> EnvState:
+             min_piece_size: int, max_piece_size: int) -> EnvState:
         puzzle = create_puzzle(
             key,
             grid_size=grid_size,
@@ -40,13 +39,13 @@ class EnvState(environment.EnvState):
             max_piece_size=max_piece_size,
         ).astype(jnp.float32)
 
-        initial_free_space = jnp.sum(jnp.abs(puzzle[0]))
+        initial_free_space = jnp.sum(jnp.abs(puzzle[0])).astype(jnp.int32)
 
         return cls(grid=puzzle[0],
                    next_piece=puzzle[1],
                    other_pieces=puzzle[2:],
                    initial_free_space=initial_free_space,
-                   time=time,
+                   time=0,
                    )
 
     def roll_top_left(self) -> EnvState:
@@ -98,21 +97,21 @@ class PuzzlePacking(environment.Environment[EnvState, EnvParams]):
         new_other_pieces = new_other_pieces.at[-1].set(
             jnp.zeros_like(new_other_pieces[-1]))
 
+        # Calculate reward
+        reward = self.calculate_reward(
+            grid=state.grid,
+            piece=moved_piece,
+            penalty=penalty,
+            initial_free_space=state.initial_free_space,
+            penalty_factor=params.penalty_factor,
+        )
+
         # Update state
         state = state.replace(
             grid=new_grid,
             next_piece=new_next_piece,
             other_pieces=new_other_pieces,
             time=state.time + 1,
-        )
-
-        # Calculate reward
-        reward = self.calculate_reward(
-            grid=new_grid,
-            piece=moved_piece,
-            penalty=penalty,
-            initial_free_space=state.initial_free_space,
-            penalty_factor=params.penalty_factor,
         )
 
         done = self.is_terminal(state, params)
@@ -135,17 +134,29 @@ class PuzzlePacking(environment.Environment[EnvState, EnvParams]):
         return jnp.array([row_shift, col_shift])
 
     def calculate_reward(self, grid: jax.Array,
-                         piece: jax.Array, penalty: float,
-                         initial_free_space: jax.Array,
+                         piece: jax.Array, penalty: int,
+                         initial_free_space: int,
                          penalty_factor: float):
 
         old_penalty = jnp.abs(grid).sum()
-        new_penalty = jnp.abs(grid + piece).sum() - \
-            (penalty * (1.0 + penalty_factor))
+        new_penalty = jnp.abs(grid + piece).sum() + (penalty * penalty_factor)
 
-        diff = new_penalty - old_penalty
-        normalized_diff = diff / initial_free_space
-        return normalized_diff
+        # old_penalty_scaled = scale_to_unit_range(
+        #     old_penalty,
+        #     m=initial_free_space,
+        #     penalty_factor=penalty_factor
+        # )
+
+        # new_penalty_scaled = scale_to_unit_range(
+        #     new_penalty,
+        #     m=initial_free_space,
+        #     penalty_factor=penalty_factor
+        # )
+
+        # reward = new_penalty_scaled - old_penalty_scaled
+        reward = (old_penalty - new_penalty) / initial_free_space
+
+        return reward
 
     def reset_env(self, key: PRNGKeyArray, params: EnvParams):
         state = EnvState.init(
@@ -154,7 +165,6 @@ class PuzzlePacking(environment.Environment[EnvState, EnvParams]):
             n_pieces=self.n_pieces,
             min_piece_size=self.min_piece_size,
             max_piece_size=self.max_piece_size,
-            time=0,
         ).roll_top_left()
         return self.get_obs(state), state
 
@@ -222,7 +232,7 @@ class PuzzlePacking(environment.Environment[EnvState, EnvParams]):
         grid_norm = mcolors.BoundaryNorm(boundaries, grid_cmap.N)
 
         # Plot
-        _, axes = plt.subplots(1, 5, figsize=(5, 1))
+        _, axes = plt.subplots(1, self.n_pieces+1, figsize=(self.n_pieces, 1))
         for i, ax in enumerate(axes):
             if i == 0:
                 ax.imshow(grid, cmap=grid_cmap, norm=grid_norm)
@@ -237,6 +247,21 @@ class PuzzlePacking(environment.Environment[EnvState, EnvParams]):
 
 
 COLORMAPS = [
+    'Purples',
+    'Blues',
+    'Greens',
+    'Oranges',
+    'Reds',
+    'Purples',
+    'Blues',
+    'Greens',
+    'Oranges',
+    'Reds',
+    'Purples',
+    'Blues',
+    'Greens',
+    'Oranges',
+    'Reds',
     'Purples',
     'Blues',
     'Greens',
@@ -392,4 +417,13 @@ def padded_translate(piece: jax.Array, shift: jax.Array, grid_size: int):
     rolled_cropped = rolled[:grid_size, :grid_size]
     off_grid_penalty = rolled.sum() - rolled_cropped.sum()
     # Step 3: Crop the central 4x4 region
+
+    # Step 4: get off_grid_penalty as int
+    off_grid_penalty = off_grid_penalty.astype(jnp.int32)
+
     return rolled[:grid_size, :grid_size], off_grid_penalty
+
+
+def scale_to_unit_range(x: jax.Array, m: int, penalty_factor: int):
+    worst = m + m * penalty_factor
+    return 1 - 2 * (x / worst)

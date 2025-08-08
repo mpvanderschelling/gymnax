@@ -78,7 +78,7 @@ class RolloutWrapper:
                 new_cum_reward,
                 new_valid_mask,
             ]
-            y = [obs, action, reward, next_obs, done]
+            y = [obs, action, reward, next_obs, done, state]
             return carry, y
 
         # Scan over episode step loop
@@ -96,9 +96,9 @@ class RolloutWrapper:
             self.env_params.max_steps_in_episode,
         )
         # Return the sum of rewards accumulated by agent in episode rollout
-        obs, action, reward, next_obs, done = scan_out
+        obs, action, reward, next_obs, done, state = scan_out
         cum_return = carry_out[-2]
-        return obs, action, reward, next_obs, done, cum_return
+        return obs, action, reward, next_obs, done, cum_return, state
 
     @property
     def input_shape(self):
